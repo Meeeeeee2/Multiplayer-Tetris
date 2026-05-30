@@ -44,7 +44,7 @@ bool InitEnet()
 	
 	
 
-	enet_address_set_host(&address, "192.168.1.195"); // IP of whatever connecting to (127.0.0.1 is local) 
+	enet_address_set_host(&address, "138.68.183.224"); // IP of whatever connecting to (127.0.0.1 is local) 
 	// My Lan IP (192.168.1.195)
 	// server IP (138.68.183.224)
 	address.port = 7777; // any port (make sure it is unused)
@@ -79,9 +79,6 @@ void HandleEnetEvents()
 			memcpy(&pData, event.packet->data, sizeof(PackedData));
 
 			UnPackData(pData);
-
-
-
 			break;
 
 			// Incase the server disconnects 

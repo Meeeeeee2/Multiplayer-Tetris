@@ -13,7 +13,8 @@ enum command
 	Clear,
 	Start,
 	NewPiece,
-	End
+	End,
+	Stick
 };
 struct PackedData
 {

@@ -5,6 +5,7 @@
 #include <vector>
 #include <raylib.h>
 #include <random>
+#include <thread>
 
 
 
@@ -28,8 +29,11 @@ struct PlayerData
 	int level;
 	int score;
     Piece cPiece;
-    PlayerData()
+    PlayerData() 
     {
+        lines = 0;
+        level = 0;
+        score = 0;
         cPiece.type = -1;
     }
 };
@@ -47,7 +51,7 @@ const int paddingY = tileSize;
 const float softDropSpeed = 0.06f;
 const float gravityTable[20] =
 {
-	0.800f, // 0
+	0.100f, // 0
 	0.717f, // 1
 	0.633f, // 2
 	0.550f, // 3
@@ -325,7 +329,23 @@ int windowHeight = (tileSize * 21) + paddingY;
 
 void SpawnPiece(int playerIndex);
 
-void StartMatch();
+void StickCurrentPiece(int playerIndex);
+
+void DropCurrentPiece(int playerIndex);
+
+bool CanDrop(int playerIndex);
+
+bool CanMoveCurrentPiece(int direction, int playerIndex);
+
+void MoveCurrentPiece(int direction, int playerIndex);
+
+bool CanRotateCurrentPiece(int playerIndex);
+
+void RotateCurrentPiece(int playerIndex);
+
+void HandleInputs();
+
+void StartMatch(int seed);
 
 void UnPackData(PackedData pData);
 
@@ -343,7 +363,10 @@ Vector2 coord(int idx)
 }
 
 void DrawBoards();
+
 bool LoadTiles();
+
+
 int main() {
 	std::cout << "Starting Client\n";
 	
@@ -361,6 +384,8 @@ int main() {
 	}
 
 	//create window
+    SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
+
 	InitWindow(windowWidth, windowHeight, "Tetris (Client)");
 	std::cout << "Width, Height" << windowWidth << "," << windowHeight << "\n";
 
@@ -377,6 +402,7 @@ int main() {
 		boards[1][i] = 255;
 	}
 
+   
 
 	while (!WindowShouldClose())
 	{
@@ -398,23 +424,53 @@ int main() {
 
                 dropTimer += dt;
 
+
+                for (int i = 0; i < 2; ++i)
+                    playerData[i].level = (playerData[i].lines / 10);
+                
+                // handles everything but softDrop
+                HandleInputs();
+
+                float gravity = gravityTable[std::min(playerData[0].level, 18)];
+
+                // deals with soft drop
+                if (IsKeyDown(KEY_S) || IsKeyDown(KEY_LEFT_SHIFT))
+                    gravity = std::min(gravity, softDropSpeed);
+                
+
+                if (dropTimer > gravity)
+                {
+                    dropTimer = 0;
+                    if (CanDrop(0))
+                    {
+                        DropCurrentPiece(0);
+                        SendData(0, playerID, Drop);
+                    }
+                    else
+                    {
+                        StickCurrentPiece(0);
+                        SendData(0, playerID, Stick);
+
+                        SpawnPiece(0);
+                        SendData(0, playerID, NewPiece);
+                    }
+                }
+                
+
             }
-			
-            
 		}
+
+
+        HandleEnetEvents();
+
+
 		BeginDrawing();
 		ClearBackground({ 50, 50, 50, 255 });
 		DrawBoards();
 		EndDrawing();
 
-		HandleEnetEvents();
-
 		
 	}
-	
-	
-
-
 	// End of game loop
 
 	DisconnectENet(playerID);
@@ -450,6 +506,153 @@ void SpawnPiece(int playerIndex)
     currentPiece->y = spawnData[piece].y;
 }
 
+bool CanDrop(int playerIndex)
+{
+    Piece* currentPiece = &playerData[playerIndex].cPiece;
+    for (int row = 0; row < 4; row++)
+    {
+        for (int col = 0; col < 4; col++)
+        {
+            if (tetrominoes[currentPiece->type][currentPiece->rotation][row][col])
+            {
+                int x = (int)(currentPiece->x + col);
+                int y = (int)(currentPiece->y + row + 1);
+
+                // check vertical bounds
+                if (y >= 20) 
+                    return false;
+                if (y < 0)
+                    continue;
+
+                int index = idx(x, y);
+                if (boards[playerIndex][index] != 255)                
+                    return false;          
+            }
+        }
+    }
+    return true;
+}
+
+void DropCurrentPiece(int playerIndex)
+{
+    playerData[playerIndex].cPiece.y += 1;
+}
+
+void StickCurrentPiece(int playerIndex)
+{
+    Piece* currentPiece = &playerData[playerIndex].cPiece;
+    for (int row = 0; row < 4; row++)
+    {
+        for (int col = 0; col < 4; col++)
+        {
+            if (tetrominoes[currentPiece->type][currentPiece->rotation][row][col])
+            {
+                int x = (int)(currentPiece->x + col);
+                int y = (int)(currentPiece->y + row);
+                if (y >= 0) {
+                    boards[playerIndex][idx(x,y)] = (int)(currentPiece->type);
+                }
+            }
+        }
+    }
+}
+
+bool CanMoveCurrentPiece(int direction, int playerIndex)
+{
+    Piece* currentPiece = &playerData[playerIndex].cPiece;
+    for (int row = 0; row < 4; row++)
+    {
+        for (int col = 0; col < 4; col++)
+        {
+            if (tetrominoes[currentPiece->type][currentPiece->rotation][row][col])
+            {
+                int x = (int)(currentPiece->x + col + direction);
+                int y = (int)(currentPiece->y + row);
+
+                // check horizontal bounds
+                if (x < 0)
+                    return false;
+                if (x >= 10)
+                    return false;
+
+                int index = idx(x, y);
+                if (boards[playerIndex][index] != 255)
+                    return false;
+            }
+        }
+    }
+    return true;
+}
+
+void MoveCurrentPiece(int direction, int playerIndex)
+{
+    playerData[playerIndex].cPiece.x += direction;
+}
+
+bool CanRotateCurrentPiece(int playerIndex)
+{
+    Piece* currentPiece = &playerData[playerIndex].cPiece;
+
+    for (int row = 0; row < 4; row++)
+    {
+        for (int col = 0; col < 4; col++)
+        {
+            if (tetrominoes[currentPiece->type][(currentPiece->rotation + 1) % 4][row][col])
+            {
+                
+                int x = (int)(currentPiece->x + col);
+                int y = (int)(currentPiece->y + row);
+
+                // check bounds
+                if (x < 0 || x >= 10)
+                    return false;
+                if (y >= 20)
+                    return false;
+
+                //check board
+                int index = idx(x, y);
+                if (boards[playerIndex][index] != 255)
+                    return false;
+            }
+        }
+    }
+}
+
+void RotateCurrentPiece(int playerIndex)
+{
+    playerData[playerIndex].cPiece.rotation = (playerData[playerIndex].cPiece.rotation + 1) % 4;
+}
+
+void HandleInputs()
+{
+    //std::cout << "he\n";
+    if (IsKeyPressed(KEY_D))
+    {
+        if (CanMoveCurrentPiece(1, 0))
+        {
+            MoveCurrentPiece(1, 0);
+            SendData(1, playerID, Move);
+        }    
+    }
+    if (IsKeyPressed(KEY_A))
+    {
+        if (CanMoveCurrentPiece(-1, 0))
+        {
+            MoveCurrentPiece(-1, 0);
+            SendData(-1, playerID, Move);
+        }
+    }
+
+    if (IsKeyPressed(KEY_W))
+    {
+        if (CanRotateCurrentPiece(0))
+        {
+            RotateCurrentPiece(0);
+            SendData(0, playerID, Rotate);
+        }
+    }
+}
+
 void DrawBoards()
 {
     // Sides 
@@ -478,8 +681,15 @@ void DrawBoards()
         int startPixelY = paddingY;
         for (int i = 0; i < 200; i++)
         {
-            int pieceIndex = boards[j][i];
-            DrawTexture(tileSet[pieceIndex],
+            int pieceType = boards[j][i];
+            if (pieceType == 255)
+                continue;
+            int color = 3;
+            if (pieceType == 0 || pieceType == 1 || pieceType == 2) { color = 0; }
+            else if (pieceType == 3 || pieceType == 5) { color = 1; }
+            else { color = 2; }
+
+            DrawTexture(tileSet[color],
                 tileSize * (i % 10) + startPixelX,
                 tileSize * floor(i / 10) + startPixelY,
                 WHITE);
@@ -549,21 +759,48 @@ bool LoadTiles()
 
 void UnPackData(PackedData pData) {
 
+
     switch (pData.type) {
     case ROOM:
-        std::cout << "Joining Room: " << pData.playerID << "\n";
+        std::cout << "Joining Slot: " << pData.playerID << "\n";
         playerID = pData.playerID;
         break;
 
     case Start:
 
         StartMatch(pData.data);
-
         break;
 
     case NewPiece:
 
         SpawnPiece(1);
+        break;
+
+    case Drop:
+        DropCurrentPiece(1);
+        break;
+
+    case Stick:
+
+        StickCurrentPiece(1);
+        break;
+
+    case Move:
+
+        MoveCurrentPiece(pData.data, 1);
+        break;
+
+    case Rotate:
+
+        RotateCurrentPiece(1);
+        break;
+
+    case End:
+        
+        gameOver = true;
+        break;
+
+    case Clear:
 
         break;
     }
