@@ -11,7 +11,9 @@ enum command
 	Drop,
 	ROOM,
 	Clear,
-	Start
+	Start,
+	NewPiece,
+	End
 };
 struct PackedData
 {

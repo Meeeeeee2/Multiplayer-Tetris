@@ -13,7 +13,9 @@ enum command
 	Frop,
 	ROOM,
 	Clear,
-	Start
+	Start,
+	NewPiece,
+	End
 };
 
 struct ConnectedUser
@@ -31,6 +33,15 @@ struct ConnectedUser
 	}
 };
 
+struct Room
+{
+	bool pendingStart = false;
+	bool roomActive = false;
+	std::chrono::steady_clock::time_point startTime;
+};
+
+
+
 const int c_maxGames = 6;
 
 
@@ -39,7 +50,7 @@ ENetEvent event;
 ENetHost* server;
 
 ConnectedUser players[c_maxGames * 2];
-
+Room roomList[c_maxGames];
 
 
 struct PackedData
@@ -49,102 +60,20 @@ struct PackedData
 	int data;
 };
 
+void HandleIncomingTraffic(PackedData pData);
+
 void SendString(ENetPeer* peer, std::string data) {
 	ENetPacket* packet = enet_packet_create(data.c_str(), sizeof(data) + 1, ENET_PACKET_FLAG_RELIABLE);
 	enet_peer_send(peer, 0, packet);// where, what channel, packet
 }
 
-void SendData(int data,int playerID, command type, ENetPeer* peer, ENetPacketFlag flag) {
-	PackedData pData;
-	pData.data = data;
-	pData.type = type;
-	pData.playerSlot = playerID;
+void SendData(int data, int playerID, command type, ENetPeer* peer, ENetPacketFlag flag);
 
-	ENetPacket* packet = enet_packet_create(&pData, sizeof(PackedData), flag);
-	enet_peer_send(peer, 0, packet);
-}
+void StartRoom(int room);
 
-void StartRoom(int room ,long long delay)
-{
-	std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+int GetNextAvailableGameSlot(ConnectedUser players[c_maxGames * 2]);
 
-	std::cout << "starting Room " << room << "\n";
-	
 
-	for (int i = 0; i < 2; i++)
-	{
-		SendData(0,
-			room * 2 + i,
-			Start,
-			players[room * 2 + i].peer,
-			ENET_PACKET_FLAG_RELIABLE);
-	}
-	
-}
-
-int GetNextAvailableGameSlot(ConnectedUser players[c_maxGames * 2])
-{
-	int rooms[c_maxGames];
-	for (int i = 0; i < c_maxGames; i++) rooms[i] = 0;
-
-	int highestPlayer = 0;
-	int currentRoom = -1;
-
-	for (int i = 0; i < c_maxGames * 2; i++)
-	{
-		if (players[i].PlayerID != -1)
-		{
-			rooms[(int)floor(i / 2)] += 1;
-		}
-	}
-	for (int i = 0; i < c_maxGames; i++)
-	{
-		if ((rooms[i] > highestPlayer && rooms[i] < 2 )|| (rooms[i] < 2 && currentRoom == -1))
-		{
-			currentRoom = i;
-			highestPlayer = rooms[i];
-		}
-	
-	}
-	if (currentRoom == -1) return currentRoom;
-	if (rooms[currentRoom] == 1)
-	{
-		int slotA = currentRoom * 2;
-		int slotB = slotA + 1;
-
-		static std::thread t(StartRoom, currentRoom, 1000);
-		t.detach();
-
-		if (players[slotA].PlayerID == -1)
-		{
-			return slotA;
-		}
-		else 
-			if (players[slotB].PlayerID == -1)
-			{
-				return slotB;
-			}
-		
-
-	}
-	else {
-		currentRoom *= 2;
-	}
-	return currentRoom;
-}
-
-UINT16 GetAvailableGameSlots(ConnectedUser players[c_maxGames * 2])
-{
-	UINT16 result = 0;
-	for (int i = 0; i < c_maxGames * 2; i++) 
-	{
-		if (players[i].PlayerID != -1)
-		{
-			result |= 1 << i;
-		}
-	}
-	return result;
-}
 
 int main() {
 
@@ -192,6 +121,9 @@ int main() {
 
 	while (true)
 	{
+		//-------------------
+		// Game Logic
+		//-------------------
 		auto currentTime = clock::now();
 
 		std::chrono::duration<float> delta = currentTime - lastTime;
@@ -199,6 +131,19 @@ int main() {
 
 		lastTime = currentTime;
 		
+		for (int roomID = 0; roomID < c_maxGames; ++roomID)
+		{
+			if (roomList[roomID].pendingStart &&
+				std::chrono::steady_clock::now() >= roomList[roomID].startTime)
+			{
+				StartRoom(roomID);
+				roomList[roomID].pendingStart = false;
+				roomList[roomID].roomActive = true;
+			}
+		}
+		//-------------------
+		// Networking Loop
+		//-------------------
 		while (enet_host_service(server, &event, 0) > 0)
 		{
 			
@@ -225,12 +170,9 @@ int main() {
 				break;
 
 			case ENET_EVENT_TYPE_RECEIVE:
-				printf("Packet of length %u containing %u recieved from %x:%u on channel %u\n ",
-					event.packet->dataLength,
-					*(int*)event.packet->data,
-					event.peer->address.host,
-					event.peer->address.port,
-					event.channelID);
+				PackedData pData;
+				memcpy(&pData, event.packet->data, sizeof(PackedData));
+				HandleIncomingTraffic(pData);
 				break;
 
 			case ENET_EVENT_TYPE_DISCONNECT:
@@ -257,15 +199,6 @@ int main() {
 				break;
 			}
 		}
-		//-------------------
-		// Game Logic
-		//-------------------
-
-
-
-
-
-
 	}
 	//GAME LOOP END
 
@@ -273,4 +206,107 @@ int main() {
 
 
 	return EXIT_SUCCESS;
+}
+
+
+void SendData(int data, int playerID, command type, ENetPeer* peer, ENetPacketFlag flag) {
+	PackedData pData;
+	pData.data = data;
+	pData.type = type;
+	pData.playerSlot = playerID;
+
+	ENetPacket* packet = enet_packet_create(&pData, sizeof(PackedData), flag);
+	enet_peer_send(peer, 0, packet);
+}
+
+void HandleIncomingTraffic(PackedData pData)
+{
+	int room = floor((pData.playerSlot - 1) / 2);
+	if (roomList[room].roomActive) 
+	{
+		int slotA = room * 2;
+		int slotB = room * 2 + 1;
+		int targetSlot;
+		if ((pData.playerSlot - 1) == slotA)
+		{
+			targetSlot = slotB;
+		}
+		else
+		{
+			targetSlot = slotA;
+		}
+		
+		SendData(pData.data,targetSlot + 1, pData.type, players[targetSlot].peer, ENET_PACKET_FLAG_RELIABLE);
+
+		if (pData.type != End) {
+			roomList[room].roomActive = false;
+		}
+	}
+}
+
+void StartRoom(int room)
+{
+	std::cout << "starting Room " << room << "\n";
+
+	int seed = static_cast<int>(time(nullptr));
+	for (int i = 0; i < 2; i++)
+	{
+		SendData(seed,
+			room * 2 + i,
+			Start,
+			players[room * 2 + i].peer,
+			ENET_PACKET_FLAG_RELIABLE);
+	}
+}
+
+int GetNextAvailableGameSlot(ConnectedUser players[c_maxGames * 2])
+{
+	int rooms[c_maxGames];
+	for (int i = 0; i < c_maxGames; i++) rooms[i] = 0;
+
+	int highestPlayer = 0;
+	int currentRoom = -1;
+
+	for (int i = 0; i < c_maxGames * 2; i++)
+	{
+		if (players[i].PlayerID != -1)
+		{
+			rooms[(int)floor(i / 2)] += 1;
+		}
+	}
+	for (int i = 0; i < c_maxGames; i++)
+	{
+		if ((rooms[i] > highestPlayer && rooms[i] < 2) || (rooms[i] < 2 && currentRoom == -1))
+		{
+			currentRoom = i;
+			highestPlayer = rooms[i];
+		}
+
+	}
+	if (currentRoom == -1) return currentRoom;
+	if (rooms[currentRoom] == 1)
+	{
+		int slotA = currentRoom * 2;
+		int slotB = slotA + 1;
+
+
+		roomList[currentRoom].pendingStart = true;
+		roomList[currentRoom].startTime = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+
+		if (players[slotA].PlayerID == -1)
+		{
+			return slotA;
+		}
+		else
+			if (players[slotB].PlayerID == -1)
+			{
+				return slotB;
+			}
+
+
+	}
+	else {
+		currentRoom *= 2;
+	}
+	return currentRoom;
 }

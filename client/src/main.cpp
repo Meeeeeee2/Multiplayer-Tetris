@@ -4,13 +4,15 @@
 #include <cmath>
 #include <vector>
 #include <raylib.h>
-
+#include <random>
 
 
 
 // -----------------
 //  Client Code
 // -----------------
+
+
 
 struct Piece
 {
@@ -26,6 +28,10 @@ struct PlayerData
 	int level;
 	int score;
     Piece cPiece;
+    PlayerData()
+    {
+        cPiece.type = -1;
+    }
 };
 
 
@@ -64,6 +70,8 @@ const float gravityTable[20] =
 };
 
 unsigned char boards[2][200];
+
+float dropTimer = 0.0f;
 
 float delay = 0.0f;
 
@@ -275,27 +283,51 @@ const int tetrominoes[7][4][4][4] =
     }
 };
 
+struct SpawnData
+{
+    int x;
+    int y;
+    int rotation;
+};
+
+const SpawnData spawnData[7] =
+{
+    // I
+    {3, -1, 0},
+
+    // O
+    {4, 0, 0},
+
+    // T
+    {4, -1, 2},
+
+    // S
+    {4, 0, 0},
+
+    // Z
+    {4, 0, 0},
+
+    // J
+    {4, -1, 2},
+
+    // L
+    {4, -1, 2}
+};
+
+std::mt19937 rng[2];
+std::uniform_int_distribution<int> pieceDist(0, 6);
+
+
+
+
 int windowWidth = ((tileSize * 12) + (4 * tileSize)) * 2;
 int windowHeight = (tileSize * 21) + paddingY;
 
-void UnPackData(PackedData pData) {
+void SpawnPiece(int playerIndex);
 
-	switch (pData.type) {
-	case ROOM:
-		std::cout << "Joining Room: " << pData.playerID << "\n";
-		playerID = pData.playerID;
-		break;
+void StartMatch();
 
-	case Start:
-		gameOver = false;
-        std::cout << "Game Starting";
-		break;
-
-   
-
-	}
-		
-}
+void UnPackData(PackedData pData);
 
 int idx(int x, int y)
 {
@@ -310,66 +342,8 @@ Vector2 coord(int idx)
 	return result;
 }
 
-void DrawBoards()
-{
-	// Sides 
-	for (int i = 0; i < 21; i++) {
-		// Player 1
-		DrawTexture(tileSet[3], 0, tileSize * i + paddingY, WHITE);
-		DrawTexture(tileSet[3], tileSize * 11, tileSize * i + paddingY, WHITE);
-
-		// Player 2
-		DrawTexture(tileSet[3], windowWidth / 2, tileSize * i + paddingY, WHITE);
-		DrawTexture(tileSet[3], tileSize * 11 + windowWidth / 2, tileSize * i + paddingY, WHITE);
-	}
-	// Bottom
-	for (int i = 0; i < 10; i++) {
-		// Player 1
-		DrawTexture(tileSet[3], tileSize * (i + 1), tileSize * (20  + paddingY / tileSize), WHITE);
-		
-		// Player 2
-		DrawTexture(tileSet[3], tileSize * (i + 1) + windowWidth / 2, tileSize * (20 + paddingY / tileSize), WHITE);
-	}
-
-	
-	for (int j = 0; j < 2; j++)
-	{
-		int startPixelX = tileSize + (windowWidth / 2) * j;
-		int startPixelY = paddingY;
-		for (int i = 0; i < 200; i++)
-		{
-			int pieceIndex = boards[j][i];
-			DrawTexture(tileSet[pieceIndex], 
-				tileSize * (i % 10) + startPixelX,
-				tileSize * floor(i / 10) + startPixelY,
-				WHITE);
-		}
-	}
-	
-}
-
-bool LoadTiles()
-{
-	for (int i = 0; i < 4; i++) {
-
-		std::string path = std::string(RESOURCES_PATH) + "/tile" + std::to_string(i + 1) + ".png";
-		Image tile = LoadImage(path.c_str());
-
-		if (tile.data == nullptr)
-		{
-			std::cout << "Failed to load: " << path << "\n";
-			continue;
-		}
-		
-		tileSet[i] = LoadTextureFromImage(tile);
-		UnloadImage(tile);
-
-		tileSet[i].width *= tileSize / 10;
-		tileSet[i].height *= tileSize / 10;
-	}
-	return EXIT_SUCCESS;
-}
-
+void DrawBoards();
+bool LoadTiles();
 int main() {
 	std::cout << "Starting Client\n";
 	
@@ -385,14 +359,12 @@ int main() {
 			break;
 		}
 	}
-	
-	
-	
-	//create window
-	
 
+	//create window
 	InitWindow(windowWidth, windowHeight, "Tetris (Client)");
 	std::cout << "Width, Height" << windowWidth << "," << windowHeight << "\n";
+
+    // Load Required Textures
 	if (LoadTiles() != EXIT_SUCCESS)
 	{
 		std::cout << "Failed to load Textures\nExiting ...";
@@ -400,7 +372,6 @@ int main() {
 	}
 
 
-	// Game Loop Goes here 
 	for (int i = 0; i < 200; i++) {
 		boards[0][i] = 255;
 		boards[1][i] = 255;
@@ -410,10 +381,26 @@ int main() {
 	while (!WindowShouldClose())
 	{
 		if (!gameOver)
-		{
-			//----------------------
-			// Main Game Logic
-			//----------------------
+        {
+            float dt = GetFrameTime();
+
+            if (delay > 0.0001)
+            {
+                delay -= dt;
+            }
+            else {
+                delay = 0.0f;
+
+                //----------------------
+                // Main Game Logic
+                //----------------------
+
+
+                dropTimer += dt;
+
+            }
+			
+            
 		}
 		BeginDrawing();
 		ClearBackground({ 50, 50, 50, 255 });
@@ -433,4 +420,152 @@ int main() {
 	DisconnectENet(playerID);
 
 	return EXIT_SUCCESS;
+}
+
+
+void StartMatch(int seed)
+{
+    gameOver = false;
+
+    srand(seed);
+    rng[0].seed(seed);
+    rng[1].seed(seed);
+
+    SpawnPiece(0);
+
+    SendData(0, playerID, NewPiece);
+
+    delay = 1.0f;
+
+    std::cout << "Starting Match.\n";
+}
+
+void SpawnPiece(int playerIndex)
+{
+    int piece = pieceDist(rng[playerIndex]);
+    Piece* currentPiece = &playerData[playerIndex].cPiece;
+    currentPiece->type = piece;
+    currentPiece->rotation = spawnData[piece].rotation;
+    currentPiece->x = spawnData[piece].x;
+    currentPiece->y = spawnData[piece].y;
+}
+
+void DrawBoards()
+{
+    // Sides 
+    for (int i = 0; i < 21; i++) {
+        // Player 1
+        DrawTexture(tileSet[3], 0, tileSize * i + paddingY, WHITE);
+        DrawTexture(tileSet[3], tileSize * 11, tileSize * i + paddingY, WHITE);
+
+        // Player 2
+        DrawTexture(tileSet[3], windowWidth / 2, tileSize * i + paddingY, WHITE);
+        DrawTexture(tileSet[3], tileSize * 11 + windowWidth / 2, tileSize * i + paddingY, WHITE);
+    }
+    // Bottom
+    for (int i = 0; i < 10; i++) {
+        // Player 1
+        DrawTexture(tileSet[3], tileSize * (i + 1), tileSize * (20 + paddingY / tileSize), WHITE);
+
+        // Player 2
+        DrawTexture(tileSet[3], tileSize * (i + 1) + windowWidth / 2, tileSize * (20 + paddingY / tileSize), WHITE);
+    }
+
+    // draw the current board state
+    for (int j = 0; j < 2; j++)
+    {
+        int startPixelX = tileSize + (windowWidth / 2) * j;
+        int startPixelY = paddingY;
+        for (int i = 0; i < 200; i++)
+        {
+            int pieceIndex = boards[j][i];
+            DrawTexture(tileSet[pieceIndex],
+                tileSize * (i % 10) + startPixelX,
+                tileSize * floor(i / 10) + startPixelY,
+                WHITE);
+        }
+    }
+
+    // draw current falling pieces 
+    
+    for (int j = 0; j < 2; j++)
+    {
+        int type = playerData[j].cPiece.type;
+        if (type >= 0) 
+        {
+            int startPixelX = tileSize + (windowWidth / 2) * j;
+            int startPixelY = paddingY;
+
+            for (int row = 0; row < 4; row++)
+            {
+                for (int col = 0; col < 4; col++)
+                {
+                    Piece* currentPiece = &playerData[j].cPiece;
+                    if (tetrominoes[type][currentPiece->rotation][row][col])
+                    {
+                        int color = 3;
+                        if (type == 0 || type == 1 || type == 2) { color = 0; }
+                        else if (type == 3 || type == 5) { color = 1; }
+                        else { color = 2; }
+
+                        if (currentPiece->y + row >= 0) {
+                            DrawTexture(tileSet[color],
+                                (currentPiece->x + col) * tileSize + startPixelX,
+                                (currentPiece->y + row) * tileSize + startPixelY,
+                                RAYWHITE);
+                        }
+                    }
+                }
+            }
+        }
+        
+
+    }
+    
+
+}
+
+bool LoadTiles()
+{
+    for (int i = 0; i < 4; i++) {
+
+        std::string path = std::string(RESOURCES_PATH) + "/tile" + std::to_string(i + 1) + ".png";
+        Image tile = LoadImage(path.c_str());
+
+        if (tile.data == nullptr)
+        {
+            std::cout << "Failed to load: " << path << "\n";
+            continue;
+        }
+
+        tileSet[i] = LoadTextureFromImage(tile);
+        UnloadImage(tile);
+
+        tileSet[i].width *= tileSize / 10;
+        tileSet[i].height *= tileSize / 10;
+    }
+    return EXIT_SUCCESS;
+}
+
+void UnPackData(PackedData pData) {
+
+    switch (pData.type) {
+    case ROOM:
+        std::cout << "Joining Room: " << pData.playerID << "\n";
+        playerID = pData.playerID;
+        break;
+
+    case Start:
+
+        StartMatch(pData.data);
+
+        break;
+
+    case NewPiece:
+
+        SpawnPiece(1);
+
+        break;
+    }
+   
 }
