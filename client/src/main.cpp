@@ -29,6 +29,7 @@ struct PlayerData
 	int level;
 	int score;
     Piece cPiece;
+    std::vector<int> linesToClear;
     PlayerData() 
     {
         lines = 0;
@@ -51,7 +52,7 @@ const int paddingY = tileSize;
 const float softDropSpeed = 0.06f;
 const float gravityTable[20] =
 {
-	0.100f, // 0
+	0.800f, // 0
 	0.717f, // 1
 	0.633f, // 2
 	0.550f, // 3
@@ -71,6 +72,13 @@ const float gravityTable[20] =
 	0.050f, // 17 
 	0.033f, // 18 
 	0.017f  // 19
+};
+
+int scoreTable[] = {
+    40,  // 1 lines clear
+    100, // 2 lines clears
+    300, // 3 lines clears
+    1200 // 4 lines clears
 };
 
 unsigned char boards[2][200];
@@ -322,12 +330,22 @@ std::mt19937 rng[2];
 std::uniform_int_distribution<int> pieceDist(0, 6);
 
 
+constexpr float AutoRepeatTime = 0.1f;
+constexpr float DASDelay = 0.266f;
+
+float DASCharge = 0.0f;
+float autoRepeatTimer = 0.0f;
+
+float rightHeld = false;
+float leftHeld = false;
 
 
 int windowWidth = ((tileSize * 12) + (4 * tileSize)) * 2;
 int windowHeight = (tileSize * 21) + paddingY;
 
 void SpawnPiece(int playerIndex);
+
+void HandleLineClears(int playerIndex);
 
 void StickCurrentPiece(int playerIndex);
 
@@ -365,6 +383,8 @@ Vector2 coord(int idx)
 void DrawBoards();
 
 bool LoadTiles();
+
+void PrintStats(int playerIndex);
 
 
 int main() {
@@ -410,12 +430,51 @@ int main() {
         {
             float dt = GetFrameTime();
 
-            if (delay > 0.0001)
+            // DAS Charge Logic
+
+            if (rightHeld || leftHeld)
             {
-                delay -= dt;
+                DASCharge += dt;
+
+                if (DASCharge > DASDelay)
+                {
+                    autoRepeatTimer += dt;
+                }
             }
+            
+            // Main Logic
+            if (delay != 0) {
+                if (delay > 0.0001)
+                {
+                    delay -= dt;
+                }
+                else
+                {
+                    delay = 0.0f;
+
+                    for (int i = 0; i < 2; ++i)
+                    {
+                        std::vector<int>* linesToClear = &playerData[i].linesToClear;
+                        if (linesToClear->size() > 0)
+                        {
+                            // Handle stats
+                            playerData[i].score += scoreTable[linesToClear->size() - 1] * (playerData[i].level + 1);
+                            playerData[i].lines += linesToClear->size();
+
+                            PrintStats(i);
+
+                            // Handle moving data
+                            for (int line : *linesToClear)
+                            {
+                                memcpy(&boards[i][10], &boards[i][0], line * 10);
+                            }
+                            linesToClear->clear();
+                        }
+                    }
+                }
+            }
+            
             else {
-                delay = 0.0f;
 
                 //----------------------
                 // Main Game Logic
@@ -430,6 +489,33 @@ int main() {
                 
                 // handles everything but softDrop
                 HandleInputs();
+
+                // Movement From DAS
+                if (leftHeld)
+                {
+                    while (autoRepeatTimer > AutoRepeatTime)
+                    {
+                        if (CanMoveCurrentPiece(-1, 0))
+                        {
+                            MoveCurrentPiece(-1, 0);
+                            SendData(-1, playerID, Move);
+                        }
+                        autoRepeatTimer -= AutoRepeatTime;
+                    }
+                }
+                if (rightHeld)
+                {
+                    while (autoRepeatTimer > AutoRepeatTime)
+                    {
+                        if (CanMoveCurrentPiece(1, 0))
+                        {
+                            MoveCurrentPiece(1, 0);
+                            SendData(1, playerID, Move);
+                        }
+                        autoRepeatTimer -= AutoRepeatTime;
+                    }
+                }
+                
 
                 float gravity = gravityTable[std::min(playerData[0].level, 18)];
 
@@ -450,6 +536,8 @@ int main() {
                     {
                         StickCurrentPiece(0);
                         SendData(0, playerID, Stick);
+
+                        HandleLineClears(0);
 
                         SpawnPiece(0);
                         SendData(0, playerID, NewPiece);
@@ -478,6 +566,14 @@ int main() {
 	return EXIT_SUCCESS;
 }
 
+
+void PrintStats(int playerIndex)
+{
+    std::cout << "Player: " << playerIndex << "\n"
+              << "Level: " << playerData[playerIndex].level << "\n"
+              << "Lines: " << playerData[playerIndex].lines << "\n"
+              << "Score: " << playerData[playerIndex].score << "\n";
+}
 
 void StartMatch(int seed)
 {
@@ -557,6 +653,42 @@ void StickCurrentPiece(int playerIndex)
     }
 }
 
+void HandleLineClears(int playerIndex)
+{
+    std::vector<int> *linesToClear = &playerData[playerIndex].linesToClear;
+    for (int y = 0; y < 20; ++y)
+    {
+        bool full = true;
+
+        for (int x = 0; x < 10; ++x)
+        {
+            if (boards[playerIndex][idx(x, y)] == 255)
+                full = false;
+        }
+        
+        if (full)
+            linesToClear->emplace_back(y);
+    }
+
+    for (int line : *linesToClear)
+    {
+        for (int x = 0; x < 10; ++x)
+        {
+            boards[playerIndex][idx(x, line)] = 255;
+        }
+    }
+    if (playerIndex == 0)
+    {
+        delay = 0.2f;
+        if (linesToClear->size() > 0)
+            delay = 0.283;
+    }
+        
+    
+
+    
+}
+
 bool CanMoveCurrentPiece(int direction, int playerIndex)
 {
     Piece* currentPiece = &playerData[playerIndex].cPiece;
@@ -625,7 +757,19 @@ void RotateCurrentPiece(int playerIndex)
 
 void HandleInputs()
 {
-    //std::cout << "he\n";
+    //DAS Requirements
+    if (IsKeyDown(KEY_A))
+        leftHeld = true;
+    else
+        leftHeld = false;
+
+    if (IsKeyDown(KEY_D))
+        rightHeld = true;
+    else
+        rightHeld = false;
+
+
+    // Other Inputs
     if (IsKeyPressed(KEY_D))
     {
         if (CanMoveCurrentPiece(1, 0))
@@ -633,6 +777,10 @@ void HandleInputs()
             MoveCurrentPiece(1, 0);
             SendData(1, playerID, Move);
         }    
+        DASCharge = 0.0f;
+        autoRepeatTimer = 0.0f;
+
+        rightHeld = true;
     }
     if (IsKeyPressed(KEY_A))
     {
@@ -641,6 +789,10 @@ void HandleInputs()
             MoveCurrentPiece(-1, 0);
             SendData(-1, playerID, Move);
         }
+        DASCharge = 0.0f;
+        autoRepeatTimer = 0.0f;
+
+        leftHeld = true;
     }
 
     if (IsKeyPressed(KEY_W))
@@ -651,6 +803,10 @@ void HandleInputs()
             SendData(0, playerID, Rotate);
         }
     }
+
+    
+    
+    
 }
 
 void DrawBoards()
@@ -783,6 +939,7 @@ void UnPackData(PackedData pData) {
     case Stick:
 
         StickCurrentPiece(1);
+        HandleLineClears(1);
         break;
 
     case Move:
