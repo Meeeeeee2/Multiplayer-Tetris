@@ -87,7 +87,8 @@ unsigned char boards[2][200];
 
 float dropTimer = 0.0f;
 
-float delay = 0.0f;
+float delay0 = 0.0f;
+float delay1 = 0.0f;
 
 std::vector<int> linesToClear;
 
@@ -341,6 +342,7 @@ float autoRepeatTimer = 0.0f;
 float rightHeld = false;
 float leftHeld = false;
 
+bool OpponentConnected = false;
 
 int windowWidth = ((tileSize * 12) + (4 * tileSize)) * 2;
 int windowHeight = (tileSize * 21) + paddingY;
@@ -348,6 +350,8 @@ int windowHeight = (tileSize * 21) + paddingY;
 void SpawnPiece(int playerIndex);
 
 void HandleLineClears(int playerIndex);
+
+void ClearLines(int playerIndex);
 
 void StickCurrentPiece(int playerIndex);
 
@@ -388,6 +392,8 @@ void DrawBoards();
 
 bool LoadTiles();
 
+void  DisplayOpponentState();
+
 void PrintStats(int playerIndex);
 
 void DisplayStats(int playerIndex);
@@ -398,6 +404,7 @@ void DrawNextPiece(int playerIndex);
 int main() {
 	std::cout << "Starting Client\n";
 	
+    // Established connection to server with ENet
 	while (true)
 	{
 		if (InitEnet() == EXIT_FAILURE)
@@ -424,7 +431,7 @@ int main() {
 		return EXIT_FAILURE;
 	}
 
-
+    //clears the board
 	for (int i = 0; i < 200; i++) {
 		boards[0][i] = 255;
 		boards[1][i] = 255;
@@ -451,33 +458,29 @@ int main() {
             }
             
             // Main Logic
-            if (delay != 0) {
-                if (delay > 0.0001)
+            if (delay1 != 0) {
+                if (delay1 > 0.0001)
                 {
-                    delay -= dt;
+                    delay1 -= dt;
                 }
                 else
                 {
-                    delay = 0.0f;
+                    delay1 = 0.0f;
 
-                    for (int i = 0; i < 2; ++i)
-                    {
-                        std::vector<int>* linesToClear = &playerData[i].linesToClear;
-                        if (linesToClear->size() > 0)
-                        {
-                            // Handle stats
-                            playerData[i].score += scoreTable[linesToClear->size() - 1] * (playerData[i].level + 1);
-                            playerData[i].lines += linesToClear->size();
+                    ClearLines(1);
+                }
+            }
 
+            if (delay0 != 0) {
+                if (delay0 > 0.0001)
+                {
+                    delay0 -= dt;
+                }
+                else
+                {
+                    delay0 = 0.0f;
 
-                            // Handle moving data
-                            for (int line : *linesToClear)
-                            {
-                                memcpy(&boards[i][10], &boards[i][0], line * 10);
-                            }
-                            linesToClear->clear();
-                        }
-                    }
+                    ClearLines(0);
                 }
             }
             
@@ -507,7 +510,7 @@ int main() {
                             MoveCurrentPiece(-1, 0);
                             SendData(-1, playerID, Move);
                         }
-                        autoRepeatTimer -= AutoRepeatTime;
+                        autoRepeatTimer = 0;
                     }
                 }
                 if (rightHeld)
@@ -519,7 +522,7 @@ int main() {
                             MoveCurrentPiece(1, 0);
                             SendData(1, playerID, Move);
                         }
-                        autoRepeatTimer -= AutoRepeatTime;
+                        autoRepeatTimer = 0;
                     }
                 }
                 
@@ -560,6 +563,7 @@ int main() {
 
             }
 		}
+       
 
 
         HandleEnetEvents();
@@ -577,7 +581,7 @@ int main() {
             DrawNextPiece(i);
         }
             
-
+        DisplayOpponentState();
         
 
 		EndDrawing();
@@ -589,6 +593,28 @@ int main() {
 	DisconnectENet(playerID);
 
 	return EXIT_SUCCESS;
+}
+
+
+void  DisplayOpponentState()
+{
+    std::string text;
+    int x;
+    if (OpponentConnected)
+    {
+        text = "Opponent Connected";
+        x = GetScreenWidth() / 2 + 150;
+    }
+    else
+    {
+        text = "No Opponent Connected ... Waiting";
+        x = GetScreenWidth() / 2 + 40;
+    }
+    DrawText(text.c_str(),
+        x,
+        10,
+        30,
+        RAYWHITE);
 }
 
 void DisplayStats(int playerIndex)
@@ -654,7 +680,6 @@ void DrawNextPiece(int playerIndex)
         }
     }
 }
-
 
 void DrawBoards()
 {
@@ -738,7 +763,6 @@ void DrawBoards()
 
 }
 
-
 void PrintStats(int playerIndex)
 {
     std::cout << "Player: " << playerIndex << "\n"
@@ -759,8 +783,12 @@ void StartMatch(int seed)
 
     SendData(0, playerID, NewPiece);
 
-    delay = 1.0f;
+    for (int i = 0; i < 200; i++) {
+        boards[0][i] = 255;
+        boards[1][i] = 255;
+    }
 
+    delay0 = 1.0f;
     std::cout << "Starting Match.\n";
 }
 
@@ -874,14 +902,39 @@ void HandleLineClears(int playerIndex)
     }
     if (playerIndex == 0)
     {
-        delay = 0.2f;
+        delay0 = 0.2f;
         if (linesToClear->size() > 0)
-            delay = 0.283;
+            delay0 = 0.283;
+    }
+    else if (playerIndex == 1)
+    {
+        delay1 = 0.2f;
+        if (linesToClear->size() > 0)
+            delay1 = 0.283;
     }
         
     
 
     
+}
+
+void ClearLines(int playerIndex)
+{
+    std::vector<int>* linesToClear = &playerData[playerIndex].linesToClear;
+    if (linesToClear->size() > 0)
+    {
+        // Handle stats
+        playerData[playerIndex].score += scoreTable[linesToClear->size() - 1] * (playerData[playerIndex].level + 1);
+        playerData[playerIndex].lines += linesToClear->size();
+
+
+        // Handle shifting the board for the line clear 
+        for (int line : *linesToClear)
+        {
+            memcpy(&boards[playerIndex][10], &boards[playerIndex][0], line * 10);
+        }
+        linesToClear->clear();
+    }
 }
 
 bool CanMoveCurrentPiece(int direction, int playerIndex)
@@ -935,6 +988,8 @@ bool CanRotateCurrentPiece(int playerIndex)
                     return false;
                 if (y >= 20)
                     return false;
+                if (y < 0)
+                    continue;
 
                 //check board
                 int index = idx(x, y);
@@ -1094,5 +1149,12 @@ void UnPackData(PackedData pData) {
         gameOver = true;
         break;
 
+    case OpponentConnect:
+
+        if(pData.data == 1)
+            OpponentConnected = true;
+        else 
+            OpponentConnected = false;
+        break;
     }
 }

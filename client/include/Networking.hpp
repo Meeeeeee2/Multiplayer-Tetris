@@ -14,7 +14,8 @@ enum command
 	Start,
 	NewPiece,
 	End,
-	Stick
+	Stick,
+	OpponentConnect
 };
 struct PackedData
 {

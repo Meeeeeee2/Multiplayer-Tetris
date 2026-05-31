@@ -17,7 +17,8 @@ enum command
 	Start,
 	NewPiece,
 	End,
-	Stick
+	Stick,
+	OpponentConnect
 };
 
 struct ConnectedUser
@@ -37,6 +38,7 @@ struct ConnectedUser
 
 struct Room
 {
+	int playerCount = 0;
 	bool pendingStart = false;
 	bool roomActive = false;
 	std::chrono::steady_clock::time_point startTime;
@@ -122,7 +124,9 @@ int main() {
 	int playerID;
 
 	float dropTimer = 0;
-
+	int lastRoomState[c_maxGames];
+	for (int i = 0; i < c_maxGames; i++)
+		lastRoomState[i] = 0;
 	while (true)
 	{
 		//-------------------
@@ -144,6 +148,17 @@ int main() {
 				roomList[roomID].pendingStart = false;
 				roomList[roomID].roomActive = true;
 			}
+
+			if (roomList[roomID].playerCount == 2 && lastRoomState[roomID] != 2)
+			{
+				for (int j = 0; j < 2; j++)
+				{
+					int slot = roomID * 2 + j;
+
+					SendData(1, slot + 1, OpponentConnect, players[slot].peer, ENET_PACKET_FLAG_RELIABLE);
+				}
+			}
+			lastRoomState[roomID] = roomList[roomID].playerCount;
 		}
 		//-------------------
 		// Networking Loop
@@ -161,6 +176,9 @@ int main() {
 				playerID = GetNextAvailableGameSlot(players) + 1;
 
 				if (playerID > 0) {
+
+					int room = (int)(playerID - 1) / 2;
+					roomList[room].playerCount += 1;
 
 					players[playerID - 1].host = event.peer->address.host;
 					players[playerID - 1].port = event.peer->address.port;
@@ -183,11 +201,11 @@ int main() {
 				printf(" % x: % u disconnected \n",
 					event.peer->address.host,
 					event.peer->address.port);
-				int room;
+				int room = -1;
 				if (event.data > 0)
 				{
 					std::cout << "Disconnecting Player: " << event.data - 1 << "\n";
-					players[event.data - 1].PlayerID = -1;
+					players[event.data - 1] = ConnectedUser();
 
 					room = (int)((event.data - 1) / 2);
 				}
@@ -204,9 +222,17 @@ int main() {
 						}
 					}
 				}
-				if (roomList[room].roomActive)
-					EndRoom(room);
-				roomList[room].pendingStart = false;
+
+				
+
+				if (room >= 0 )
+				{
+					roomList[room].playerCount -= 1;
+					roomList[room].pendingStart = false;
+					if (roomList[room].roomActive)
+						EndRoom(room);
+					
+				}	
 				event.peer->data = NULL;
 				break;
 			}
@@ -222,6 +248,13 @@ int main() {
 
 
 void SendData(int data, int playerID, command type, ENetPeer* peer, ENetPacketFlag flag) {
+
+	if (peer == nullptr)
+	{
+		std::cout << "Not Sending Packet As target is nullptr\n";
+		return;
+	}
+
 	PackedData pData;
 	pData.data = data;
 	pData.type = type;
@@ -233,7 +266,13 @@ void SendData(int data, int playerID, command type, ENetPeer* peer, ENetPacketFl
 
 void HandleIncomingTraffic(PackedData pData)
 {
-	std::cout << pData.playerSlot << "\n";
+
+	if (pData.playerSlot < 1 ||
+		pData.playerSlot > c_maxGames * 2)
+	{
+		return;
+	}
+
 	int room = (int)((pData.playerSlot - 1) / 2);
 	if (roomList[room].roomActive) 
 	{
@@ -268,10 +307,14 @@ void StartRoom(int room)
 	int seed = static_cast<int>(time(nullptr));
 	for (int i = 0; i < 2; i++)
 	{
+		int slot = room * 2 + i;
+
+		
+
 		SendData(seed,
-			room * 2 + i,
+			slot + 1,
 			Start,
-			players[room * 2 + i].peer,
+			players[slot].peer,
 			ENET_PACKET_FLAG_RELIABLE);
 	}
 }
@@ -281,6 +324,12 @@ void EndRoom(int room)
 	roomList[room].roomActive = false;
 	int slotA = room * 2;
 	int slotB = room * 2 + 1;
+
+	if (players[slotA].peer == nullptr)
+		SendData(-1, slotB + 1, OpponentConnect, players[slotB].peer, ENET_PACKET_FLAG_RELIABLE);
+	if (players[slotB].peer == nullptr)
+		SendData(-1, slotA + 1, OpponentConnect, players[slotA].peer, ENET_PACKET_FLAG_RELIABLE);
+
 	for (int i = 0; i < 2; ++i)
 	{
 		int slot = room * 2 + i;
@@ -329,13 +378,10 @@ int GetNextAvailableGameSlot(ConnectedUser players[c_maxGames * 2])
 		{
 			return slotA;
 		}
-		else
-			if (players[slotB].PlayerID == -1)
-			{
-				return slotB;
-			}
-
-
+		else if (players[slotB].PlayerID == -1)
+		{
+			return slotB;
+		}
 	}
 	else {
 		currentRoom *= 2;
