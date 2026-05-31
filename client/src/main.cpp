@@ -14,7 +14,11 @@
 // -----------------
 
 
-
+enum Scene
+{
+    Menu,
+    Game
+};
 struct Piece
 {
     int type = 0;
@@ -347,6 +351,16 @@ bool OpponentConnected = false;
 int windowWidth = ((tileSize * 12) + (4 * tileSize)) * 2;
 int windowHeight = (tileSize * 21) + paddingY;
 
+Scene scene = Menu;
+bool connectedToServer = false;
+
+Rectangle exitButton = {
+                   5,
+                   5,
+                   (tileSize - 10) * 2,
+                   tileSize - 10
+};
+
 void SpawnPiece(int playerIndex);
 
 void HandleLineClears(int playerIndex);
@@ -400,29 +414,17 @@ void DisplayStats(int playerIndex);
 
 void DrawNextPiece(int playerIndex);
 
+void ConnectServer();
 
 int main() {
 	std::cout << "Starting Client\n";
 	
-    // Established connection to server with ENet
-	while (true)
-	{
-		if (InitEnet() == EXIT_FAILURE)
-		{
-			std::cout << "ENet Connection Failed, Trying again\n";
-		}
-		else 
-		{
-			std::cout << "Server Connection Established\n";
-			break;
-		}
-	}
+    
 
-	//create window
+    //create window
     SetConfigFlags(FLAG_WINDOW_ALWAYS_RUN);
 
-	InitWindow(windowWidth, windowHeight, "Tetris (Client)");
-	std::cout << "Width, Height" << windowWidth << "," << windowHeight << "\n";
+    InitWindow(windowWidth, windowHeight, "Tetris (Client)");
 
     // Load Required Textures
 	if (LoadTiles() != EXIT_SUCCESS)
@@ -441,160 +443,225 @@ int main() {
 
 	while (!WindowShouldClose())
 	{
-		if (!gameOver)
+        BeginDrawing();
+
+        ClearBackground({ 50, 50, 50, 255 });
+        switch (scene)
         {
-            float dt = GetFrameTime();
+        case Game:
 
-            // DAS Charge Logic
+           
 
-            if (rightHeld || leftHeld)
+            if (!gameOver)
             {
-                DASCharge += dt;
+                float dt = GetFrameTime();
 
-                if (DASCharge > DASDelay)
+                // DAS Charge Logic
+
+                if (rightHeld || leftHeld)
                 {
-                    autoRepeatTimer += dt;
-                }
-            }
-            
-            // Main Logic
-            if (delay1 != 0) {
-                if (delay1 > 0.0001)
-                {
-                    delay1 -= dt;
-                }
-                else
-                {
-                    delay1 = 0.0f;
+                    DASCharge += dt;
 
-                    ClearLines(1);
-                }
-            }
-
-            if (delay0 != 0) {
-                if (delay0 > 0.0001)
-                {
-                    delay0 -= dt;
-                }
-                else
-                {
-                    delay0 = 0.0f;
-
-                    ClearLines(0);
-                }
-            }
-            
-            else {
-
-                //----------------------
-                // Main Game Logic
-                //----------------------
-
-
-                dropTimer += dt;
-
-
-                for (int i = 0; i < 2; ++i)
-                    playerData[i].level = (playerData[i].lines / 10);
-                
-                // handles everything but softDrop
-                HandleInputs();
-
-                // Movement From DAS
-                if (leftHeld)
-                {
-                    while (autoRepeatTimer > AutoRepeatTime)
+                    if (DASCharge > DASDelay)
                     {
-                        if (CanMoveCurrentPiece(-1, 0))
-                        {
-                            MoveCurrentPiece(-1, 0);
-                            SendData(-1, playerID, Move);
-                        }
-                        autoRepeatTimer = 0;
+                        autoRepeatTimer += dt;
                     }
                 }
-                if (rightHeld)
-                {
-                    while (autoRepeatTimer > AutoRepeatTime)
+
+                // Main Logic
+                if (delay1 != 0) {
+                    if (delay1 > 0.0001)
                     {
-                        if (CanMoveCurrentPiece(1, 0))
-                        {
-                            MoveCurrentPiece(1, 0);
-                            SendData(1, playerID, Move);
-                        }
-                        autoRepeatTimer = 0;
-                    }
-                }
-                
-
-                float gravity = gravityTable[std::min(playerData[0].level, 18)];
-
-                // deals with soft drop
-                if (IsKeyDown(KEY_S) || IsKeyDown(KEY_LEFT_SHIFT))
-                    gravity = std::min(gravity, softDropSpeed);
-                
-
-                if (dropTimer > gravity)
-                {
-                    dropTimer = 0;
-                    if (CanDrop(0))
-                    {
-                        DropCurrentPiece(0);
-                        SendData(0, playerID, Drop);
+                        delay1 -= dt;
                     }
                     else
                     {
-                        StickCurrentPiece(0);
-                        SendData(0, playerID, Stick);
+                        delay1 = 0.0f;
 
-                        HandleLineClears(0);
-
-                        SpawnPiece(0);
-                        SendData(0, playerID, NewPiece);
-
-                        if (ToppedOut(0))
-                        {
-                            SendData(0, playerID, End);
-                            gameOver = true;
-                        }
+                        ClearLines(1);
                     }
                 }
-                
 
+                if (delay0 != 0) {
+                    if (delay0 > 0.0001)
+                    {
+                        delay0 -= dt;
+                    }
+                    else
+                    {
+                        delay0 = 0.0f;
+
+                        ClearLines(0);
+                    }
+                }
+
+                else {
+
+                    //----------------------
+                    // Main Game Logic
+                    //----------------------
+
+
+                    dropTimer += dt;
+
+
+                    for (int i = 0; i < 2; ++i)
+                        playerData[i].level = (playerData[i].lines / 10);
+
+                    // handles everything but softDrop
+                    HandleInputs();
+
+                    // Movement From DAS
+                    if (leftHeld)
+                    {
+                        while (autoRepeatTimer > AutoRepeatTime)
+                        {
+                            if (CanMoveCurrentPiece(-1, 0))
+                            {
+                                MoveCurrentPiece(-1, 0);
+                                SendData(-1, playerID, Move);
+                            }
+                            autoRepeatTimer = 0;
+                        }
+                    }
+                    if (rightHeld)
+                    {
+                        while (autoRepeatTimer > AutoRepeatTime)
+                        {
+                            if (CanMoveCurrentPiece(1, 0))
+                            {
+                                MoveCurrentPiece(1, 0);
+                                SendData(1, playerID, Move);
+                            }
+                            autoRepeatTimer = 0;
+                        }
+                    }
+
+
+                    float gravity = gravityTable[std::min(playerData[0].level, 18)];
+
+                    // deals with soft drop
+                    if (IsKeyDown(KEY_S) || IsKeyDown(KEY_LEFT_SHIFT))
+                        gravity = std::min(gravity, softDropSpeed);
+
+
+                    if (dropTimer > gravity)
+                    {
+                        dropTimer = 0;
+                        if (CanDrop(0))
+                        {
+                            DropCurrentPiece(0);
+                            SendData(0, playerID, Drop);
+                        }
+                        else
+                        {
+                            StickCurrentPiece(0);
+                            SendData(0, playerID, Stick);
+
+                            HandleLineClears(0);
+
+                            SpawnPiece(0);
+                            SendData(0, playerID, NewPiece);
+
+                            if (ToppedOut(0))
+                            {
+                                SendData(0, playerID, End);
+                                DisconnectENet(playerID);
+                                gameOver = true;
+                            }
+                        }
+                    }
+
+
+                }
             }
-		}
-       
+
+            HandleEnetEvents();
 
 
-        HandleEnetEvents();
+            // Return To Menu Button
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+            {
+                if (CheckCollisionPointRec(GetMousePosition(), exitButton))
+                {
+                    DisconnectENet(playerID);
+                    gameOver = true;
+                    scene = Menu;
+                }
+            }
 
+            DrawBoards();
 
-		BeginDrawing();
+            for (int i = 0; i < 2; ++i)
+            {
+                DisplayStats(i);
+                DrawNextPiece(i);
+            }
 
-		ClearBackground({ 50, 50, 50, 255 });
+            DisplayOpponentState();
 
-		DrawBoards();
+            // draws to the screen the exit button
+            DrawRectangleRec(exitButton, RED);
 
-        for (int i = 0; i < 2; ++i)
-        {
-            DisplayStats(i);
-            DrawNextPiece(i);
+            break;
+
+             case Menu:
+
+                 Rectangle startButton = {
+                     GetScreenWidth() / 2 - 100,
+                     GetScreenHeight() / 2 - 50,
+                     200,
+                     100
+                 };
+                
+                 DrawRectangleRec(startButton, GREEN);
+
+                 if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+                 {
+                     if (CheckCollisionPointRec(GetMousePosition(), startButton))
+                     {
+                         ConnectServer();
+                     }
+                 }
+                 
+                 break;
+
         }
-            
-        DisplayOpponentState();
-        
-
-		EndDrawing();
-
 		
+       
+        EndDrawing();
+
 	}
 	// End of game loop
 
-	DisconnectENet(playerID);
+    if (connectedToServer)
+    {
+        DisconnectENet(playerID);
+        connectedToServer = false;
+    }
 
 	return EXIT_SUCCESS;
 }
 
+
+void ConnectServer()
+{
+    // Established connection to server with ENet
+    while (true)
+    {
+        if (InitEnet() == EXIT_FAILURE)
+        {
+            std::cout << "ENet Connection Failed, Trying again\n";
+        }
+        else
+        {
+            std::cout << "Server Connection Established\n";
+            break;
+        }
+    }
+    scene = Game;
+    connectedToServer = true;
+}
 
 void  DisplayOpponentState()
 {
@@ -778,6 +845,9 @@ void StartMatch(int seed)
     srand(seed);
     rng[0].seed(seed);
     rng[1].seed(seed);
+
+    playerData[0].cPiece.type = -1;
+    playerData[1].cPiece.type = -1;
 
     SpawnPiece(0);
 
@@ -1007,6 +1077,8 @@ void RotateCurrentPiece(int playerIndex)
 
 void HandleInputs()
 {
+   
+
     //DAS Requirements
     if (IsKeyDown(KEY_A))
         leftHeld = true;
@@ -1147,6 +1219,8 @@ void UnPackData(PackedData pData) {
 
     case End:
         gameOver = true;
+        DisconnectENet(playerID);
+        connectedToServer = false;
         break;
 
     case OpponentConnect:
