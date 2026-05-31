@@ -29,13 +29,15 @@ struct PlayerData
 	int level;
 	int score;
     Piece cPiece;
+    Piece nextPiece;
     std::vector<int> linesToClear;
     PlayerData() 
     {
         lines = 0;
         level = 0;
         score = 0;
-        cPiece.type = -1;
+        cPiece.type = -1; 
+        nextPiece.type = -1;
     }
 };
 
@@ -365,6 +367,8 @@ void HandleInputs();
 
 void StartMatch(int seed);
 
+bool ToppedOut(int playerIndex);
+
 void UnPackData(PackedData pData);
 
 int idx(int x, int y)
@@ -385,6 +389,10 @@ void DrawBoards();
 bool LoadTiles();
 
 void PrintStats(int playerIndex);
+
+void DisplayStats(int playerIndex);
+
+void DrawNextPiece(int playerIndex);
 
 
 int main() {
@@ -461,7 +469,6 @@ int main() {
                             playerData[i].score += scoreTable[linesToClear->size() - 1] * (playerData[i].level + 1);
                             playerData[i].lines += linesToClear->size();
 
-                            PrintStats(i);
 
                             // Handle moving data
                             for (int line : *linesToClear)
@@ -541,6 +548,12 @@ int main() {
 
                         SpawnPiece(0);
                         SendData(0, playerID, NewPiece);
+
+                        if (ToppedOut(0))
+                        {
+                            SendData(0, playerID, End);
+                            gameOver = true;
+                        }
                     }
                 }
                 
@@ -553,8 +566,20 @@ int main() {
 
 
 		BeginDrawing();
+
 		ClearBackground({ 50, 50, 50, 255 });
+
 		DrawBoards();
+
+        for (int i = 0; i < 2; ++i)
+        {
+            DisplayStats(i);
+            DrawNextPiece(i);
+        }
+            
+
+        
+
 		EndDrawing();
 
 		
@@ -564,6 +589,153 @@ int main() {
 	DisconnectENet(playerID);
 
 	return EXIT_SUCCESS;
+}
+
+void DisplayStats(int playerIndex)
+{
+    int x = tileSize * 12 + 35 + (playerIndex * GetScreenWidth() * 0.5);
+    DrawText("Next:",
+        x,
+        tileSize + 20,
+        30,
+        RAYWHITE);
+
+    DrawText(
+        TextFormat("Level:\n\n %01i", playerData[playerIndex].level),
+        x,
+        tileSize * 5 + 30,
+        30,
+        RAYWHITE);
+
+    DrawText(
+        TextFormat("Lines:\n\n %01i", playerData[playerIndex].lines),
+        x,
+        tileSize * 5 + 100,
+        30,
+        RAYWHITE);
+
+    DrawText(
+        TextFormat("Score:\n\n %01i", playerData[playerIndex].score),
+        x,
+        tileSize * 5 + 170,
+        30,
+        RAYWHITE);
+}
+
+void DrawNextPiece(int playerIndex)
+{
+    int type = playerData[playerIndex].nextPiece.type;
+    if (type >= 0)
+    {
+        int startPixelX = tileSize * 12 + (playerIndex * GetScreenWidth() * 0.5);
+        int startPixelY = tileSize + 60;
+
+        for (int row = 0; row < 4; row++)
+        {
+            for (int col = 0; col < 4; col++)
+            {
+                Piece* nextPiece = &playerData[playerIndex].nextPiece;
+                
+                if (tetrominoes[type][spawnData[type].rotation][row][col])
+                {
+                    int color = 3;
+                    if (type == 0 || type == 1 || type == 2) { color = 0; }
+                    else if (type == 3 || type == 5) { color = 1; }
+                    else { color = 2; }
+
+                   
+                    DrawTexture(tileSet[color],
+                        col * tileSize + startPixelX,
+                        row * tileSize + startPixelY,
+                        RAYWHITE);
+                    
+                }
+            }
+        }
+    }
+}
+
+
+void DrawBoards()
+{
+    // Sides 
+    for (int i = 0; i < 21; i++) {
+        // Player 1
+        DrawTexture(tileSet[3], 0, tileSize * i + paddingY, WHITE);
+        DrawTexture(tileSet[3], tileSize * 11, tileSize * i + paddingY, WHITE);
+
+        // Player 2
+        DrawTexture(tileSet[3], windowWidth / 2, tileSize * i + paddingY, WHITE);
+        DrawTexture(tileSet[3], tileSize * 11 + windowWidth / 2, tileSize * i + paddingY, WHITE);
+    }
+    // Bottom
+    for (int i = 0; i < 10; i++) {
+        // Player 1
+        DrawTexture(tileSet[3], tileSize * (i + 1), tileSize * (20 + paddingY / tileSize), WHITE);
+
+        // Player 2
+        DrawTexture(tileSet[3], tileSize * (i + 1) + windowWidth / 2, tileSize * (20 + paddingY / tileSize), WHITE);
+    }
+
+    // draw the current board state
+    for (int j = 0; j < 2; j++)
+    {
+        int startPixelX = tileSize + (windowWidth / 2) * j;
+        int startPixelY = paddingY;
+        for (int i = 0; i < 200; i++)
+        {
+            int pieceType = boards[j][i];
+            if (pieceType == 255)
+                continue;
+            int color = 3;
+            if (pieceType == 0 || pieceType == 1 || pieceType == 2) { color = 0; }
+            else if (pieceType == 3 || pieceType == 5) { color = 1; }
+            else { color = 2; }
+
+            DrawTexture(tileSet[color],
+                tileSize * (i % 10) + startPixelX,
+                tileSize * floor(i / 10) + startPixelY,
+                WHITE);
+        }
+    }
+
+    // draw current falling pieces 
+
+    for (int j = 0; j < 2; j++)
+    {
+        int type = playerData[j].cPiece.type;
+        if (type >= 0)
+        {
+            int startPixelX = tileSize + (windowWidth / 2) * j;
+            int startPixelY = paddingY;
+
+            for (int row = 0; row < 4; row++)
+            {
+                for (int col = 0; col < 4; col++)
+                {
+                    Piece* currentPiece = &playerData[j].cPiece;
+                    if (tetrominoes[type][currentPiece->rotation][row][col])
+                    {
+                        int color = 3;
+                        if (type == 0 || type == 1 || type == 2) { color = 0; }
+                        else if (type == 3 || type == 5) { color = 1; }
+                        else { color = 2; }
+
+                        if (currentPiece->y + row >= 0) {
+                            DrawTexture(tileSet[color],
+                                (currentPiece->x + col) * tileSize + startPixelX,
+                                (currentPiece->y + row) * tileSize + startPixelY,
+                                RAYWHITE);
+                        }
+                    }
+                }
+            }
+        }
+
+
+    }
+
+
 }
 
 
@@ -594,12 +766,35 @@ void StartMatch(int seed)
 
 void SpawnPiece(int playerIndex)
 {
-    int piece = pieceDist(rng[playerIndex]);
+    
+
     Piece* currentPiece = &playerData[playerIndex].cPiece;
-    currentPiece->type = piece;
-    currentPiece->rotation = spawnData[piece].rotation;
-    currentPiece->x = spawnData[piece].x;
-    currentPiece->y = spawnData[piece].y;
+    Piece* nextPiece = &playerData[playerIndex].nextPiece;
+
+    // Handles the start of the game when next piece doesnt yet have a value 
+    if (nextPiece->type == -1)
+    {
+        int piece = pieceDist(rng[playerIndex]);
+
+        nextPiece->type = piece;
+        nextPiece->rotation = spawnData[piece].rotation;
+        nextPiece->x = spawnData[piece].x;
+        nextPiece->y = spawnData[piece].y;
+    }
+
+    // Copies next Piece to the current Piece
+    currentPiece->type = nextPiece->type;
+    currentPiece->rotation = nextPiece->rotation;
+    currentPiece->x = nextPiece->x;
+    currentPiece->y = nextPiece->y;
+
+    // Randomly Generates Next Piece
+    int piece = pieceDist(rng[playerIndex]);
+
+    nextPiece->type = piece;
+    nextPiece->rotation = spawnData[piece].rotation;
+    nextPiece->x = spawnData[piece].x;
+    nextPiece->y = spawnData[piece].y;
 }
 
 bool CanDrop(int playerIndex)
@@ -809,88 +1004,6 @@ void HandleInputs()
     
 }
 
-void DrawBoards()
-{
-    // Sides 
-    for (int i = 0; i < 21; i++) {
-        // Player 1
-        DrawTexture(tileSet[3], 0, tileSize * i + paddingY, WHITE);
-        DrawTexture(tileSet[3], tileSize * 11, tileSize * i + paddingY, WHITE);
-
-        // Player 2
-        DrawTexture(tileSet[3], windowWidth / 2, tileSize * i + paddingY, WHITE);
-        DrawTexture(tileSet[3], tileSize * 11 + windowWidth / 2, tileSize * i + paddingY, WHITE);
-    }
-    // Bottom
-    for (int i = 0; i < 10; i++) {
-        // Player 1
-        DrawTexture(tileSet[3], tileSize * (i + 1), tileSize * (20 + paddingY / tileSize), WHITE);
-
-        // Player 2
-        DrawTexture(tileSet[3], tileSize * (i + 1) + windowWidth / 2, tileSize * (20 + paddingY / tileSize), WHITE);
-    }
-
-    // draw the current board state
-    for (int j = 0; j < 2; j++)
-    {
-        int startPixelX = tileSize + (windowWidth / 2) * j;
-        int startPixelY = paddingY;
-        for (int i = 0; i < 200; i++)
-        {
-            int pieceType = boards[j][i];
-            if (pieceType == 255)
-                continue;
-            int color = 3;
-            if (pieceType == 0 || pieceType == 1 || pieceType == 2) { color = 0; }
-            else if (pieceType == 3 || pieceType == 5) { color = 1; }
-            else { color = 2; }
-
-            DrawTexture(tileSet[color],
-                tileSize * (i % 10) + startPixelX,
-                tileSize * floor(i / 10) + startPixelY,
-                WHITE);
-        }
-    }
-
-    // draw current falling pieces 
-    
-    for (int j = 0; j < 2; j++)
-    {
-        int type = playerData[j].cPiece.type;
-        if (type >= 0) 
-        {
-            int startPixelX = tileSize + (windowWidth / 2) * j;
-            int startPixelY = paddingY;
-
-            for (int row = 0; row < 4; row++)
-            {
-                for (int col = 0; col < 4; col++)
-                {
-                    Piece* currentPiece = &playerData[j].cPiece;
-                    if (tetrominoes[type][currentPiece->rotation][row][col])
-                    {
-                        int color = 3;
-                        if (type == 0 || type == 1 || type == 2) { color = 0; }
-                        else if (type == 3 || type == 5) { color = 1; }
-                        else { color = 2; }
-
-                        if (currentPiece->y + row >= 0) {
-                            DrawTexture(tileSet[color],
-                                (currentPiece->x + col) * tileSize + startPixelX,
-                                (currentPiece->y + row) * tileSize + startPixelY,
-                                RAYWHITE);
-                        }
-                    }
-                }
-            }
-        }
-        
-
-    }
-    
-
-}
-
 bool LoadTiles()
 {
     for (int i = 0; i < 4; i++) {
@@ -911,6 +1024,31 @@ bool LoadTiles()
         tileSet[i].height *= tileSize / 10;
     }
     return EXIT_SUCCESS;
+}
+
+bool ToppedOut(int playerIndex)
+{
+    Piece* currentPiece = &playerData[playerIndex].cPiece;
+    for (int row = 0; row < 4; ++row)
+    {
+        for (int col = 0; col < 4; ++col)
+        {
+            if (tetrominoes[currentPiece->type][currentPiece->rotation][row][col])
+            {
+                int x = currentPiece->x + col;
+                int y = currentPiece->y + row;
+
+                if (!((y >= 0 && y < 20) && (x >= 0 && x < 10)))
+                    continue;
+
+                if (boards[playerIndex][idx(x, y)] != 255)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 void UnPackData(PackedData pData) {
@@ -953,13 +1091,8 @@ void UnPackData(PackedData pData) {
         break;
 
     case End:
-        
         gameOver = true;
         break;
 
-    case Clear:
-
-        break;
     }
-   
 }

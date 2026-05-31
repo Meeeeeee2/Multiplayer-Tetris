@@ -24,8 +24,8 @@ struct ConnectedUser
 {
 	ENetPeer* peer;
 	int PlayerID;
-	UINT32 host;
-	UINT16 port;
+	uint32_t host;
+	uint16_t port;
 
 	ConnectedUser() {
 		peer = nullptr;
@@ -251,10 +251,9 @@ void HandleIncomingTraffic(PackedData pData)
 		if (pData.type == End) {
 			roomList[room].roomActive = false;
 		}
-		else {
-			if (players[targetSlot].peer != nullptr)
-				SendData(pData.data, targetSlot + 1, pData.type, players[targetSlot].peer, ENET_PACKET_FLAG_RELIABLE);
-		}
+		if (players[targetSlot].peer != nullptr)
+			SendData(pData.data, targetSlot + 1, pData.type, players[targetSlot].peer, ENET_PACKET_FLAG_RELIABLE);
+		
 		
 
 		
