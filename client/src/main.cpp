@@ -32,8 +32,13 @@ struct PlayerData
 	int lines;
 	int level;
 	int score;
+    
+    bool isDead;
+    bool hasWon;
+    
     Piece cPiece;
     Piece nextPiece;
+
     std::vector<int> linesToClear;
     PlayerData() 
     {
@@ -42,6 +47,8 @@ struct PlayerData
         score = 0;
         cPiece.type = -1; 
         nextPiece.type = -1;
+        isDead = false; 
+        hasWon = false;
     }
 };
 
@@ -406,7 +413,13 @@ void DrawBoards();
 
 bool LoadTiles();
 
-void  DisplayOpponentState();
+void DecideWinner();
+
+void DisplayOpponentState();
+
+void DisplayGameOverText();
+
+void DisplayCurrentRoom();
 
 void PrintStats(int playerIndex);
 
@@ -415,6 +428,7 @@ void DisplayStats(int playerIndex);
 void DrawNextPiece(int playerIndex);
 
 void ConnectServer();
+
 
 int main() {
 	std::cout << "Starting Client\n";
@@ -469,110 +483,122 @@ int main() {
                 }
 
                 // Main Logic
-                if (delay1 != 0) {
-                    if (delay1 > 0.0001)
-                    {
-                        delay1 -= dt;
-                    }
-                    else
-                    {
-                        delay1 = 0.0f;
-
-                        ClearLines(1);
-                    }
-                }
-
-                if (delay0 != 0) {
-                    if (delay0 > 0.0001)
-                    {
-                        delay0 -= dt;
-                    }
-                    else
-                    {
-                        delay0 = 0.0f;
-
-                        ClearLines(0);
-                    }
-                }
-
-                else {
-
-                    //----------------------
-                    // Main Game Logic
-                    //----------------------
-
-
-                    dropTimer += dt;
-
-
-                    for (int i = 0; i < 2; ++i)
-                        playerData[i].level = (playerData[i].lines / 10);
-
-                    // handles everything but softDrop
-                    HandleInputs();
-
-                    // Movement From DAS
-                    if (leftHeld)
-                    {
-                        while (autoRepeatTimer > AutoRepeatTime)
-                        {
-                            if (CanMoveCurrentPiece(-1, 0))
+                {
+                    if (!playerData[1].isDead)
+                        if (delay1 != 0) {
+                            if (delay1 > 0.0001)
                             {
-                                MoveCurrentPiece(-1, 0);
-                                SendData(-1, playerID, Move);
+                                delay1 -= dt;
                             }
-                            autoRepeatTimer = 0;
-                        }
-                    }
-                    if (rightHeld)
-                    {
-                        while (autoRepeatTimer > AutoRepeatTime)
-                        {
-                            if (CanMoveCurrentPiece(1, 0))
+                            else
                             {
-                                MoveCurrentPiece(1, 0);
-                                SendData(1, playerID, Move);
+                                delay1 = 0.0f;
+
+                                ClearLines(1);
                             }
-                            autoRepeatTimer = 0;
                         }
-                    }
-
-
-                    float gravity = gravityTable[std::min(playerData[0].level, 18)];
-
-                    // deals with soft drop
-                    if (IsKeyDown(KEY_S) || IsKeyDown(KEY_LEFT_SHIFT))
-                        gravity = std::min(gravity, softDropSpeed);
-
-
-                    if (dropTimer > gravity)
-                    {
-                        dropTimer = 0;
-                        if (CanDrop(0))
+                }
+                if (!playerData[0].isDead)
+                {
+                    if (delay0 != 0) {
+                        if (delay0 > 0.0001)
                         {
-                            DropCurrentPiece(0);
-                            SendData(0, playerID, Drop);
+                            delay0 -= dt;
                         }
                         else
                         {
-                            StickCurrentPiece(0);
-                            SendData(0, playerID, Stick);
+                            delay0 = 0.0f;
 
-                            HandleLineClears(0);
-
-                            SpawnPiece(0);
-                            SendData(0, playerID, NewPiece);
-
-                            if (ToppedOut(0))
-                            {
-                                SendData(0, playerID, End);
-                                DisconnectENet(playerID);
-                                gameOver = true;
-                            }
+                            ClearLines(0);
                         }
                     }
 
+                    else {
 
+                        //----------------------
+                        // Main Game Logic
+                        //----------------------
+
+
+                        dropTimer += dt;
+
+
+                        for (int i = 0; i < 2; ++i)
+                            playerData[i].level = (playerData[i].lines / 10);
+
+                        // handles everything but softDrop
+                        HandleInputs();
+
+                        // Movement From DAS
+                        if (leftHeld)
+                        {
+                            while (autoRepeatTimer > AutoRepeatTime)
+                            {
+                                if (CanMoveCurrentPiece(-1, 0))
+                                {
+                                    MoveCurrentPiece(-1, 0);
+                                    SendData(-1, playerID, Move);
+                                }
+                                autoRepeatTimer = 0;
+                            }
+                        }
+                        if (rightHeld)
+                        {
+                            while (autoRepeatTimer > AutoRepeatTime)
+                            {
+                                if (CanMoveCurrentPiece(1, 0))
+                                {
+                                    MoveCurrentPiece(1, 0);
+                                    SendData(1, playerID, Move);
+                                }
+                                autoRepeatTimer = 0;
+                            }
+                        }
+
+
+                        float gravity = gravityTable[std::min(playerData[0].level, 18)];
+
+                        // deals with soft drop
+                        if (IsKeyDown(KEY_S) || IsKeyDown(KEY_LEFT_SHIFT))
+                            gravity = std::min(gravity, softDropSpeed);
+
+
+                        if (dropTimer > gravity)
+                        {
+                            dropTimer = 0;
+                            if (CanDrop(0))
+                            {
+                                DropCurrentPiece(0);
+                                SendData(0, playerID, Drop);
+                            }
+                            else
+                            {
+                                StickCurrentPiece(0);
+                                SendData(0, playerID, Stick);
+
+                                HandleLineClears(0);
+
+                                SpawnPiece(0);
+                                SendData(0, playerID, NewPiece);
+
+                                if (ToppedOut(0))
+                                {
+                                    SendData(0, playerID, Death);
+                                    
+                                    
+                                    playerData[0].isDead = true;
+                                    if (playerData[1].isDead)
+                                    {
+                                        gameOver = true;
+                                        DecideWinner();
+                                        SendData(0, playerID, End);
+                                    }
+                                }
+                            }
+                        }
+
+
+                    }
                 }
             }
 
@@ -584,7 +610,10 @@ int main() {
             {
                 if (CheckCollisionPointRec(GetMousePosition(), exitButton))
                 {
-                    DisconnectENet(playerID);
+                    if (connectedToServer)
+                        DisconnectENet(playerID);
+                    connectedToServer = false;
+                    OpponentConnected = false;
                     gameOver = true;
                     scene = Menu;
                 }
@@ -599,6 +628,8 @@ int main() {
             }
 
             DisplayOpponentState();
+            DisplayCurrentRoom();
+            DisplayGameOverText();
 
             // draws to the screen the exit button
             DrawRectangleRec(exitButton, RED);
@@ -637,6 +668,7 @@ int main() {
     if (connectedToServer)
     {
         DisconnectENet(playerID);
+        OpponentConnected = false;
         connectedToServer = false;
     }
 
@@ -661,27 +693,69 @@ void ConnectServer()
     }
     scene = Game;
     connectedToServer = true;
+
+    playerData[0] = PlayerData();
+    playerData[1] = PlayerData();
+
+    for (int i = 0; i < 200; i++) {
+        boards[0][i] = 255;
+        boards[1][i] = 255;
+    }
 }
 
 void  DisplayOpponentState()
 {
     std::string text;
     int x;
-    if (OpponentConnected)
+    if (connectedToServer) 
     {
-        text = "Opponent Connected";
-        x = GetScreenWidth() / 2 + 150;
+        if (OpponentConnected)
+        {
+            text = "Opponent Connected";
+            x = GetScreenWidth() / 2 + 150;
+        }
+        else
+        {
+            text = "No Opponent Connected ... Waiting";
+            x = GetScreenWidth() / 2 + 40;
+        }
     }
     else
     {
-        text = "No Opponent Connected ... Waiting";
-        x = GetScreenWidth() / 2 + 40;
+        
+            text = "Disconnected";
+            x = GetScreenWidth() / 2 + 170;
+        
+        
+    }
+    
+    DrawText(text.c_str(),
+        x,
+        10,
+        30,
+        RAYWHITE);
+}
+
+void DisplayCurrentRoom()
+{
+    std::string text;
+    int x = 500;
+    if (connectedToServer) {
+        text = "Room: " + std::to_string(((playerID + 1) / 2));
+        x = 150;
+    }
+    else
+    {
+        text = "Not Connected ... No Room ";
+        x = 110;
     }
     DrawText(text.c_str(),
         x,
         10,
         30,
         RAYWHITE);
+    
+    
 }
 
 void DisplayStats(int playerIndex)
@@ -713,6 +787,41 @@ void DisplayStats(int playerIndex)
         tileSize * 5 + 170,
         30,
         RAYWHITE);
+}
+
+void DisplayGameOverText()
+{
+    if (playerData[0].hasWon || playerData[1].hasWon)
+    {
+        std::string text;
+
+        Color color;
+
+        if (playerData[0].hasWon)
+        {
+            text = "You Won";
+            color = GREEN;
+        }
+        else
+        {
+            text = "You Lose";
+            color = RED;
+        }
+
+        DrawText(text.c_str(),
+            GetScreenWidth() / 2 - 200,
+            GetScreenHeight() / 2 - 40,
+            80,
+            color);
+    }
+}
+
+void DecideWinner()
+{
+    if (playerData[0].score > playerData[1].score)
+        playerData[0].hasWon = true;
+    else
+        playerData[1].hasWon = true;
 }
 
 void DrawNextPiece(int playerIndex)
@@ -846,17 +955,19 @@ void StartMatch(int seed)
     rng[0].seed(seed);
     rng[1].seed(seed);
 
-    playerData[0].cPiece.type = -1;
-    playerData[1].cPiece.type = -1;
-
-    SpawnPiece(0);
-
-    SendData(0, playerID, NewPiece);
+    playerData[0] = PlayerData();
+    playerData[1] = PlayerData();
 
     for (int i = 0; i < 200; i++) {
         boards[0][i] = 255;
         boards[1][i] = 255;
     }
+
+    SpawnPiece(0);
+
+    SendData(0, playerID, NewPiece);
+
+    
 
     delay0 = 1.0f;
     std::cout << "Starting Match.\n";
@@ -1218,9 +1329,13 @@ void UnPackData(PackedData pData) {
         break;
 
     case End:
+        OpponentConnected = false;
+        playerData[1].isDead = true;
         gameOver = true;
+        DecideWinner();
         DisconnectENet(playerID);
         connectedToServer = false;
+       
         break;
 
     case OpponentConnect:
@@ -1228,7 +1343,26 @@ void UnPackData(PackedData pData) {
         if(pData.data == 1)
             OpponentConnected = true;
         else 
+        {
             OpponentConnected = false;
+            playerData[1].isDead = true;
+            gameOver = true;
+            DisconnectENet(playerID);
+            connectedToServer = false;
+        }
+            
         break;
+
+    case Death:
+        playerData[1].isDead = true;
+        if (playerData[0].isDead)
+        {
+            gameOver = true;
+            DecideWinner();
+        }
+        break;
+
     }
+    
+
 }

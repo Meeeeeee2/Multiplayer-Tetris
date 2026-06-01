@@ -18,7 +18,8 @@ enum command
 	NewPiece,
 	End,
 	Stick,
-	OpponentConnect
+	OpponentConnect,
+	Death
 };
 
 struct ConnectedUser
@@ -288,7 +289,11 @@ void HandleIncomingTraffic(PackedData pData)
 			targetSlot = slotA;
 		}
 		if (pData.type == End) {
-			roomList[room].roomActive = false;
+			if (roomList[room].roomActive)
+			{
+				EndRoom(room);
+			}
+			//roomList[room].roomActive = false;
 		}
 		if (players[targetSlot].peer != nullptr)
 			SendData(pData.data, targetSlot + 1, pData.type, players[targetSlot].peer, ENET_PACKET_FLAG_RELIABLE);
@@ -321,6 +326,7 @@ void StartRoom(int room)
 
 void EndRoom(int room)
 {
+	
 	roomList[room].roomActive = false;
 	int slotA = room * 2;
 	int slotB = room * 2 + 1;
@@ -334,7 +340,10 @@ void EndRoom(int room)
 	{
 		int slot = room * 2 + i;
 		if (players[slot].peer != nullptr)		
+		{
 			SendData(0, slot + 1, End, players[slot].peer, ENET_PACKET_FLAG_RELIABLE);
+			players[slot] = ConnectedUser();
+		}
 		
 	}
 	
